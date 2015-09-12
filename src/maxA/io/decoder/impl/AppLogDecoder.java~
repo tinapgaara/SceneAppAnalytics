@@ -1,0 +1,140 @@
+package maxA.io.decoder.impl;
+
+import maxA.avro.AppLogs;
+//import maxA.avro.schemahelpers.AppLogSchemaHelper;
+import maxA.io.AppLogRecord;
+import maxA.io.IRecord;
+import maxA.userProfile.IFeatureFilter;
+import maxA.io.decoder.IDecoder;
+import maxA.util.ErrMsg;
+import maxA.util.MaxLogger;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Created by TAN on 7/5/2015.
+ */
+public class AppLogDecoder implements IDecoder {
+
+    private List<AppLogRecord> mAppLogRecords;
+
+    // filters
+    private AppLogFilter mFilter;
+    private List<IFeatureFilter> mFeatureFilters;
+
+    public AppLogDecoder(AppLogFilter filter) {
+
+        mAppLogRecords = null;
+
+        mFilter = new AppLogFilter();
+        mFeatureFilters = null;
+    }
+
+    @Override
+    public String registerFeatureFilter(IFeatureFilter filter) {
+
+        if (filter == null) {
+            return null;
+        }
+        String filterName = filter.getName();
+
+        if (mFeatureFilters == null) {
+            mFeatureFilters = new ArrayList<IFeatureFilter>();
+        }
+        else {
+            for (IFeatureFilter existFilter : mFeatureFilters) {
+                if (filterName.equals(existFilter.getName())) {
+                    MaxLogger.error(AppLogDecoder.class,
+                            ErrMsg.msg(ErrMsg.ERR_MSG_DuplicatedRecordFilterName, filterName));
+                    return null;    // registertion failed
+                }
+            }
+        }
+
+        mFeatureFilters.add(filter);
+
+        return filterName;  // registertion successful
+    }
+
+    @Override
+    public void unregisterFeatureFilter(String filterName) {
+
+        if ( (filterName == null) || (mFeatureFilters == null) ) {
+            return;
+        }
+
+        IFeatureFilter existFilter;
+        for (int i = 0; i < mFeatureFilters.size(); i++) {
+            existFilter = mFeatureFilters.get(i);
+            if (filterName.equals(existFilter.getName())) {
+                mFeatureFilters.remove(i);
+                return;
+            }
+        }
+    }
+
+    @Override
+    public void decode(byte[] data) {
+
+        AppLogs appLog = null; //AppLogSchemaHelper.convertToAvro(data);
+
+        // do filtering with mFilter
+        if (mFilter != null) {
+            if ( mFilter.isNoise(appLog) ) {
+                return;
+            }
+        }
+
+        AppLogRecord appLogRecord = new AppLogRecord(appLog);//Todo: may not need appLogRecord, can use appLog directly
+
+        boolean isUseful = true;
+
+        // do filtering with mRecordFilters
+        if (mFeatureFilters != null) {
+            isUseful = false;
+            for (IFeatureFilter recordFilter : mFeatureFilters) {
+                if (recordFilter.isUsefulForAppLogs(appLogRecord)) {
+                    isUseful = true;
+                    recordFilter.appendInputData(appLogRecord);
+                }
+            }
+        }
+        if (isUseful) {
+            if (mAppLogRecords == null) {
+                mAppLogRecords = new ArrayList<AppLogRecord>();
+            }
+            mAppLogRecords.add(appLogRecord);
+        }
+    }
+
+    @Override
+    public IRecord[] getDecodedRecords() {
+
+        if (mAppLogRecords == null) {
+            return null;
+        }
+
+        AppLogRecord[] records = new AppLogRecord[mAppLogRecords.size()];
+        mAppLogRecords.toArray(records);
+
+        return records;
+    }
+
+    @Override
+    public void release() {
+
+        mFilter = null;
+
+        if (mFeatureFilters != null) {
+            mFeatureFilters.clear();
+            mFeatureFilters = null;
+        }
+
+        if (mAppLogRecords != null) {
+            mAppLogRecords.clear();
+            mAppLogRecords = null;
+        }
+    }
+
+}
